@@ -9,30 +9,24 @@ import cv2
 from utils import *
 from options import parse_args
 
-from models.instance import Model, InstanceGTScale, CoordAugmentation, NeighborGT, SemanticClassifier
+from models.instance import Model, CoordAugmentation, NeighborGT
 
 from datasets.scannet_dataset import ScanNetDataset
-from train_semantics import InstanceClassifier
+from scripts.prepare_data import prepare_data
 
 torch.set_printoptions(threshold=5000)
 
-CLASS_LABELS = ['cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf', 'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink', 'bathtub', 'otherfurniture']
-VALID_CLASS_IDS = np.array([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
-ID_TO_LABEL = {}
-ID_TO_LABEL[0] = 'wall'
-ID_TO_LABEL[1] = 'floor'
-ID_TO_LABEL[20] = 'invalid'
-ID_TO_LABEL[-1] = 'invalid'    
 
-DEBUG_INFO = ['cabinet', 2, 3, 'bed', 3, 4, 'chair', 4, 5, 'sofa', 5, 6, 'table', 6, 7, 'door', 7, 8, 'window', 8, 9, 'bookshelf', 9, 10, 'picture', 10, 11, 'counter', 11, 12, 'desk', 12, 14, 'curtain', 13, 16, 'refrigerator', 14, 24, 'shower curtain', 15, 28, 'toilet', 16, 33, 'sink', 17, 34, 'bathtub', 18, 36, 'otherfurniture', 19, 39]
-
-for i in range(len(VALID_CLASS_IDS)):
-    #ID_TO_LABEL[VALID_CLASS_IDS[i]] = CLASS_LABELS[i]
-    ID_TO_LABEL[i + 2] = CLASS_LABELS[i]
+class_weights = np.zeros(20, dtype=np.float32)
+semantic_counts = np.load('datasets/semantic_counts_pixelwise.npy')
+for i, x in enumerate(label_subset):
+    class_weights[i] = semantic_counts[x]
     continue
-
-
-
+class_weights = np.log(class_weights.sum() / class_weights)
+class_weights = class_weights / class_weights.sum()
+class_weights = torch.from_numpy(class_weights).cuda()
+    
+    
 def main(options):
     if not os.path.exists(options.checkpoint_dir):
         os.system("mkdir -p %s"%options.checkpoint_dir)
@@ -42,43 +36,12 @@ def main(options):
         pass
 
     
-    if 'maxpool' not in options.suffix:
-        class_weights = np.zeros(20, dtype=np.float32)
-        semantic_counts = np.load('datasets/semantic_counts_pixelwise.npy')
-        for i, x in enumerate(label_subset):
-            class_weights[i] = semantic_counts[x]
-            continue
-        #class_weights /= class_weights.sum()
-        #class_weights = 1 / np.log(1.2 + class_weights)
-
-        class_weights = np.log(class_weights.sum() / class_weights)
-        #class_weights = class_weights.sum() / class_weights
-        class_weights = class_weights / class_weights.sum()
-        class_weights = torch.from_numpy(class_weights).cuda()
-        #CLASS_LABELS = ['cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf', 'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink', 'bathtub', 'otherfurniture']
-    else:
-        class_weights = np.zeros(21, dtype=np.float32)
-        semantic_counts = np.load('datasets/semantic_counts.npy')
-        for i, x in enumerate(label_subset):
-            class_weights[i] = semantic_counts[x]
-            continue
-        class_weights[20] = 1201 #num of images
-        class_weights = np.log(class_weights.sum() / class_weights)
-        class_weights = class_weights / class_weights.sum()
-        class_weights = torch.from_numpy(class_weights).cuda()
-        pass
-    
-    
     model = Model(options)
     model.cuda()
     model.train()
 
     #neighbor_model = InstanceGT(options.inputScale, 6)
-    if 'soft' in options.suffix:
-        neighbor_model = InstanceGTScale(options)
-    else:
-        neighbor_model = NeighborGT(options)
-        pass
+    neighbor_model = NeighborGT(options)
     neighbor_model.cuda()
 
     augmentation_model = CoordAugmentation(options)
@@ -168,14 +131,14 @@ def main(options):
         for sample_index, sample in enumerate(data_iterator):
             optimizer.zero_grad()
             
-            coords, colors, faces, semantic_gt, instance_gt, invalid_instance_gt = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda(), sample[4].cuda(), sample[5].cuda()
+            coords, colors, faces, semantic_gt, instance_gt = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda(), sample[4].cuda()
 
             if 'augment' in options.suffix:
                 num_coords = [len(c) for c in coords]
                 new_coords = []                
                 new_colors = []
                 new_instances = []
-                instances = torch.stack([instance_gt, invalid_instance_gt], dim=-1)
+                instances = instance_gt.unsqueeze(-1)
                 for batch_index in range(len(coords)):
                     augmented_coords, augmented_colors, augmented_instances, _ = augmentation_model(coords[batch_index], faces[batch_index], colors[batch_index], instances[batch_index])
                     new_coords.append(torch.cat([coords[batch_index], augmented_coords], dim=0))
@@ -186,25 +149,10 @@ def main(options):
                 colors = torch.stack(new_colors, 0)
                 new_instances = torch.stack(new_instances, 0)
                 instance_gt = new_instances[:, :, 0]
-                invalid_instance_gt = new_instances[:, :, 1]                
                 pass
             
             semantic_pred, neighbor_pred = model(coords.reshape((-1, 4)), colors.reshape((-1, colors.shape[-1])))
-            #semantic_pred = semantic_pred.reshape((len(coords), -1))
-            if 'maxpool' in options.suffix:
-                semantic_pred, semantic_gt, instance_masks = semantic_model(semantic_pred, instance_gt[0], invalid_instance_gt[0], semantic_gt[0])
-                if False:
-                    coords = coords.detach().cpu().numpy()
-                    faces = faces.detach().cpu().numpy()                                            
-                    for index, instance_mask in enumerate(instance_masks):
-                        print(index, semantic_gt[index])
-                        instance_mask = instance_mask.int().detach().cpu().numpy()
-                        print(coords[0].shape, faces[0].max(), instance_mask.shape)
-                        write_ply_label('test/instance_' + str(index) + '.ply', coords[0][:, :3], faces[0], instance_mask)
-                        continue
-                    exit(1)
-                    pass
-            elif 'augment' in options.suffix:
+            if 'augment' in options.suffix:
                 semantic_pred = semantic_pred[:num_coords[0]]
                 pass
             
@@ -313,14 +261,13 @@ def testOneEpoch(options, model, neighbor_model, augmentation_model, semantic_mo
     epoch_losses = []    
     data_iterator = tqdm(dataloader, total=int(np.ceil(float(len(dataset)) / options.batchSize)))
 
-    classifier = InstanceClassifier()
     #semantic_statistics = []
     #instance_statistics = []    
     for sample_index, sample in enumerate(data_iterator):
         if sample_index == options.numTestingImages:
             break
 
-        coords, colors, faces, semantic_gt, instance_gt, invalid_instance_gt, filenames = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda(), sample[4].cuda(), sample[5].cuda(), sample[6]
+        coords, colors, faces, semantic_gt, instance_gt, filenames = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda(), sample[4].cuda(), sample[5].cuda(), sample[6]
 
         edges = torch.cat([faces[:, :, [0, 1]], faces[:, :, [1, 2]], faces[:, :, [2, 0]]], dim=1)
         if 'augment' in options.suffix:
@@ -329,7 +276,7 @@ def testOneEpoch(options, model, neighbor_model, augmentation_model, semantic_mo
             new_colors = []
             new_edges = []
             new_instances = []
-            instances = torch.stack([instance_gt, invalid_instance_gt], dim=-1)            
+            instances = instance_gt.unsqueeze(-1)
             for batch_index in range(len(coords)):
                 augmented_coords, augmented_colors, augmented_instances, augmented_edges = augmentation_model(coords[batch_index], faces[batch_index], colors[batch_index], instances[batch_index])
                 new_coords.append(torch.cat([coords[batch_index], augmented_coords], dim=0))
@@ -345,21 +292,16 @@ def testOneEpoch(options, model, neighbor_model, augmentation_model, semantic_mo
             colors = torch.stack(new_colors, 0)
             new_instances = torch.stack(new_instances, 0)
             instance_gt = new_instances[:, :, 0]
-            invalid_instance_gt = new_instances[:, :, 1]                
             edges = torch.stack(new_edges, 0)
             pass
 
         semantic_pred, neighbor_pred = model(coords.reshape((-1, 4)), colors.reshape((-1, colors.shape[-1])))
 
         #semantic_pred = semantic_pred.reshape((len(coords), -1))
-        if 'maxpool' in options.suffix:
-            semantic_pred, instance_semantic_gt, _ = semantic_model(semantic_pred, instance_gt[0], invalid_instance_gt[0], semantic_gt[0])
-            semantic_loss = torch.nn.functional.cross_entropy(semantic_pred.view((-1, int(semantic_pred.shape[-1]))), instance_semantic_gt.view(-1))
-            pass
-        elif 'augment' in options.suffix:
-            semantic_loss = torch.nn.functional.cross_entropy(semantic_pred[:num_coords[0]].view((-1, int(semantic_pred.shape[-1]))), semantic_gt.view(-1))
+        if 'augment' in options.suffix:
+            semantic_loss = torch.nn.functional.cross_entropy(semantic_pred[:num_coords[0]].view((-1, int(semantic_pred.shape[-1]))), semantic_gt.view(-1), weight=class_weights)
         else:
-            semantic_loss = torch.nn.functional.cross_entropy(semantic_pred.view((-1, int(semantic_pred.shape[-1]))), semantic_gt.view(-1))            
+            semantic_loss = torch.nn.functional.cross_entropy(semantic_pred.view((-1, int(semantic_pred.shape[-1]))), semantic_gt.view(-1), weight=class_weights)            
             pass
         semantic_pred = semantic_pred.max(-1)[1].unsqueeze(0)
         
@@ -369,27 +311,6 @@ def testOneEpoch(options, model, neighbor_model, augmentation_model, semantic_mo
             neighbor_gt = []            
             pass
 
-        if False:
-            for scale in range(len(neighbor_gt)):
-                neighbors = neighbor_gt[scale]
-                neighbor_coords = neighbors.get_spatial_locations().detach().cpu().numpy()[:, :3]
-                neighbor_labels = neighbors.features[:, :6].detach().cpu().numpy()
-                neighbor_masks = neighbors.features[:, 6:].detach().cpu().numpy()
-                write_ply_neighbor('test/input_neighbor_' + str(scale) + '.ply', neighbor_coords, neighbor_labels, neighbor_masks, size=options.inputScale // pow(2, scale))
-                continue
-
-            coords = coords.detach().cpu().numpy()[:, :, :3]
-            colors = np.clip((colors.detach().cpu().numpy() + 1) * 127.5, 0, 255).astype(np.uint8)
-            instance_gt = instance_gt.detach().cpu().numpy()
-            faces = faces.detach().cpu().numpy()
-            edges = edges.detach().cpu().numpy()            
-            #augmented_edges = augmented_edges.detach().cpu().numpy()
-            #faces = np.array([[[0, 1, 2]]])
-            write_ply_color('test/input_normal.ply', coords[0], faces[0], colors[0][:, 3:6])
-            write_ply_edge('test/input_edge.ply', coords[0], edges[0], instance_gt[0])
-            exit(1)
-        
-            
         if 'mse' not in options.suffix:
             for neighbor in neighbor_pred:
                 neighbor.features = torch.sigmoid(neighbor.features)
@@ -521,10 +442,6 @@ def testOneEpoch(options, model, neighbor_model, augmentation_model, semantic_mo
                         instance_info = [(instance_mask, label, confidence) for instance_mask, label, confidence in zip(instance_masks, labels, confidences)]
                         semantics = labels[np.maximum(instances - 1, 0)]
                         semantics[instances < 0] = -1
-                    elif False:
-                        print('classify', len(coords[batch_index]), len(instances), num_ori_coords)
-                        instance_info = classifier.classify(coords[batch_index][:num_ori_coords], colors[batch_index][:, :3][:num_ori_coords], instances[:num_ori_coords], semantics[:num_ori_coords])
-                        instance_info = [(mask[:num_ori_coords], label, confidence) for mask, label, confidence in instance_info]
                     else:
                         instance_info = []
                         pass
@@ -569,93 +486,6 @@ def testOneEpoch(options, model, neighbor_model, augmentation_model, semantic_mo
     model.train()
     augmentation_model.train()    
     return
-
-# def evaluateSemantics(semantic_pred, semantic_gt):
-#     correct_mask = semantic_pred == semantic_gt
-#     valid_mask = semantic_gt >= 0
-#     #accuracy = float(correct_mask.sum()) / valid_mask.sum()
-#     correct_predictions = semantic_gt[correct_mask]
-#     valid_targets = semantic_gt[valid_mask]
-#     num_correct_predictions = (np.expand_dims(correct_predictions, -1) == np.arange(20)).sum(0)
-#     num_targets = (np.expand_dims(valid_targets, -1) == np.arange(20)).sum(0)
-#     statistics = [num_correct_predictions.sum()] + num_correct_predictions.tolist() + [num_targets.sum()] + num_targets.tolist()
-#     return statistics
-
-# def visualizeBatch(options, coords, faces, colors, num_coords, dicts, instance_info_array, indexOffset=0, prefix=''):
-#     #cornerColorMap = {'gt': np.array([255, 0, 0]), 'pred': np.array([0, 0, 255]), 'inp': np.array([0, 255, 0])}
-#     #pointColorMap = ColorPalette(20).getColorMap()
-#     #images = ((images.transpose((0, 2, 3, 1)) + 0.5) * 255).astype(np.uint8)
-#     for batch_index in range(len(coords)):
-#         #cv2.imwrite(filename, image)
-#         write_ply_color(options.test_dir + '/' + str(indexOffset + batch_index) + '_input_color.ply', coords[batch_index], faces[batch_index], colors[batch_index][:, :3])
-#         write_ply_color(options.test_dir + '/' + str(indexOffset + batch_index) + '_input_normal.ply', coords[batch_index], faces[batch_index], colors[batch_index][:, 3:6])        
-#         for name, result_dict in dicts:
-#             semantics = result_dict['semantic'][batch_index]
-            
-#             filename = options.test_dir + '/' + str(indexOffset + batch_index) + '_' + name + '_semantic.ply'
-#             write_ply_label(filename, coords[batch_index][:len(semantics)], faces[batch_index], semantics)
-
-#             if 'instance' in result_dict:
-#                 instances = result_dict['instance'][batch_index]
-
-#                 filename = options.test_dir + '/' + str(indexOffset + batch_index) + '_' + name + '_instance.ply'
-#                 print(name, len(instances), np.unique(instances, return_counts=True))
-#                 write_ply_label(filename, coords[batch_index][:len(instances)], faces[batch_index], instances, debug_index=3)
-
-#                 if False:
-#                     filename = options.test_dir + '/' + str(indexOffset + batch_index) + '_' + name + '_edge.ply'                    
-#                     write_ply_edge(filename, coords[batch_index], faces[batch_index], instances)
-#                     pass
-                
-#                 if name == 'pred':
-#                     instance_info = instance_info_array[batch_index]
-#                     if len(instance_info) == 0:
-#                         instance_semantics = {}
-#                         for instance, semantic in zip(instances, semantics):
-#                             if instance not in instance_semantics:
-#                                 instance_semantics[instance] = []
-#                                 pass
-#                             instance_semantics[instance].append(semantic)
-#                             continue                                    
-#                         instance_semantic_map = np.zeros(max(list(instance_semantics.keys())) + 1, dtype=np.int32)
-#                         for instance, semantic_labels in instance_semantics.items():
-#                             semantic_labels, counts = np.unique(semantic_labels, return_counts=True)
-#                             instance_semantic_map[instance] = semantic_labels[counts.argmax()]
-#                             continue
-#                         print(instance_semantic_map)
-                        
-#                         instance_labels = instance_semantic_map[instances]
-#                         instance_labels = instance_labels[:num_coords[batch_index]]
-
-#                         if False:
-#                             labels = np.unique(instances[instance_labels == 3])
-#                             print(labels)
-#                             instance_gt = dicts[0][1]['instance'][batch_index]
-#                             instance_gt = instance_gt[:num_coords[batch_index]]                    
-#                             for label in labels:
-#                                 labels_gt = instance_gt[instances == label]
-#                                 labels_gt, counts = np.unique(labels_gt, return_counts=True)
-#                                 print(np.stack([labels_gt, counts], axis=-1))
-#                                 continue
-#                             pass
-#                     else:
-#                         instance_labels = np.zeros(num_coords[batch_index], dtype=np.int32)
-#                         for mask, label, confidence in instance_info:
-#                             instance_labels[mask] = label
-#                             continue
-#                         pass
-#                     #     filename = options.test_dir + '/' + str(indexOffset + batch_index) + '_' + name + '_instance_semantic_' + str(label) + '.ply'
-#                     #     write_ply_label(filename, coords[batch_index][:num_coords[batch_index]], faces[batch_index], instances[:num_coords[batch_index]], debug_index=label)
-#                     #     continue
-                    
-#                     filename = options.test_dir + '/' + str(indexOffset + batch_index) + '_' + name + '_instance_semantic.ply'
-#                     write_ply_label(filename, coords[batch_index][:num_coords[batch_index]], faces[batch_index], instance_labels[:num_coords[batch_index]])
-#                     pass                
-#                 pass
-#             #cv2.imwrite(filename.replace('image', info + '_' + name), drawSegmentationImage(result_dict[info][batch_index], blackIndex=0, blackThreshold=0.5))
-#             continue
-#         continue
-#     return
 
 
 def visualizeExample(options, coords, faces, colors, num_coords, dicts, indexOffset=0, prefix=''):
@@ -708,4 +538,9 @@ if __name__ == '__main__':
 
     print('keyname=%s task=%s started'%(args.keyname, args.task))
 
+    ## Prepare ScanNet data
+    if args.task == 'prepare':        
+        prepare_data(args)
+        exit(1)
+        pass
     main(args)

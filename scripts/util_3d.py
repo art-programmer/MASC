@@ -14,7 +14,7 @@ except:
     print("pip install plyfile")
     sys.exit(-1)
 
-import util
+import scripts.util
 
 
 # matrix: 4x4 np array

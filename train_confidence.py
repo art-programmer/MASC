@@ -53,7 +53,7 @@ def main(options):
         pass
     
     
-    dataset_test = ScanNetDataset(options, split='val', random=False)
+    dataset_test = ScanNetDataset(options, split='val', load_confidence=True, random=False)
     print(len(dataset_test))
     if options.task == 'test':
         testOneEpoch(options, confidence_model, dataset_test, validation=False)
@@ -64,7 +64,7 @@ def main(options):
         optimizer.load_state_dict(torch.load(options.checkpoint_dir + '/optim_confidence.pth'))
         pass
 
-    dataset = ScanNetDataset(options, split='train', random=True)
+    dataset = ScanNetDataset(options, split='train', load_confidence=True, random=True)
     print('the number of images', len(dataset))    
     dataloader = DataLoader(dataset, batch_size=options.batchSize, shuffle=True, num_workers=16)
 
@@ -348,7 +348,6 @@ if __name__ == '__main__':
     args.checkpoint_dir = 'checkpoint/' + args.keyname
     args.test_dir = 'test/' + args.keyname
 
-    args.trainingMode = 'confidence'
     args.inputScale = 127
     
     print('keyname=%s task=%s started'%(args.keyname, args.task))

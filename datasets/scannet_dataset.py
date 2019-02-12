@@ -29,13 +29,14 @@ def elastic(x,gran,mag):
 
 ## ScanNet dataset class
 class ScanNetDataset(Dataset):
-    def __init__(self, options, split, random=True):
+    def __init__(self, options, split, load_confidence=False, random=True):
         self.options = options
         self.split = split
         self.random = random
         self.imagePaths = []
-        self.dataFolder = '/gruvi/Data/chenliu/ScanNet/scans/'
-
+        self.dataFolder = options.dataFolder
+        self.load_confidence = load_confidence
+        
         with open('split_' + split + '.txt', 'r') as f:
             for line in f:
                 scene_id = line.strip()
@@ -134,32 +135,7 @@ class ScanNetDataset(Dataset):
             colors[:, :3] = colors[:, :3] + np.random.randn(3) * 0.1            
             pass
         
-        if self.options.trainingMode == 'semantic':
-            unique_instances, indices, instances = np.unique(instances, return_index=True, return_inverse=True)
-            labels = labels[indices]
-            labels[labels == -100] = 20
-            new_coords = np.zeros(coords.shape, dtype=coords.dtype)
-            for instance in range(len(unique_instances)):
-                instance_mask = instances == instance
-                instance_coords = coords[instance_mask]
-                mins = instance_coords.min(0)
-                maxs = instance_coords.max(0)
-                max_range = (maxs - mins).max()
-                if self.split == 'train':
-                    padding = (maxs - mins) * np.random.random(3) * 0.1
-                else:
-                    padding = max_range * 0.05
-                    pass
-                max_range += padding * 2
-                mins = (mins + maxs) / 2 - max_range / 2
-                instance_coords = np.clip(np.round((instance_coords - mins) / max_range * full_scale), 0, full_scale - 1)
-                new_coords[instance_mask] = instance_coords
-                continue
-            coords = np.concatenate([new_coords, np.expand_dims(instances, -1)], axis=-1)
-            sample = [coords.astype(np.int64), colors.astype(np.float32), faces.astype(np.int64), labels.astype(np.int64), instances.astype(np.int64), self.imagePaths[index]]
-            return sample
-
-        if self.options.trainingMode == 'confidence':
+        if self.load_confidence:
             scene_id = self.imagePaths[index].split('/')[-1].split('_vh_clean_2')[0]
             info = torch.load('test/output_normal_augment_2_' + self.split + '/cache/' + scene_id + '.pth')
             if len(info) == 2:
