@@ -15,12 +15,6 @@ def parse_args():
     parser.add_argument('--batchSize', dest='batchSize',
                         help='batch size',
                         default=1, type=int)
-    parser.add_argument('--dataset', dest='dataset',
-                        help='dataset name for training',
-                        default='scannet', type=str)
-    parser.add_argument('--testingDataset', dest='testingDataset',
-                        help='dataset name for test/predict',
-                        default='scannet', type=str)
     parser.add_argument('--numTrainingImages', dest='numTrainingImages',
                         help='the number of images to train',
                         default=0, type=int)
@@ -39,12 +33,6 @@ def parse_args():
     parser.add_argument('--startEpoch', dest='startEpoch',
                         help='starting epoch index',
                         default=-1, type=int)
-    parser.add_argument('--width', dest='width',
-                        help='input width',
-                        default=256, type=int)
-    parser.add_argument('--height', dest='height',
-                        help='input height',
-                        default=256, type=int)
     parser.add_argument('--inputScale', dest='inputScale',
                         help='input scale',
                         default=4096, type=int)
@@ -60,7 +48,9 @@ def parse_args():
     parser.add_argument('--numNeighbors', dest='numNeighbors',
                         help='the number of neighbors',
                         default=6, type=int)
-    ## Flags
+    parser.add_argument('--negativeWeights', dest='negativeWeights',
+                        help='negative weights',
+                        default='531111', type=str)
     parser.add_argument('--visualizeMode', dest='visualizeMode',
                         help='visualization mode',
                         default='', type=str)    
@@ -76,6 +66,9 @@ def parse_args():
     parser.add_argument('--labelFile', dest='labelFile',
                         help='path to scannetv2-labels.combined.tsv',
                         default='/gruvi/Data/chenliu/ScanNet/tasks/scannetv2-labels.combined.tsv', type=str)
+    parser.add_argument('--split', dest='split',
+                        help='data split: [train, test, val]',
+                        default='val', type=str)    
     
     args = parser.parse_args()
     return args

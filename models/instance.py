@@ -5,6 +5,7 @@ import numpy as np
 import time
 
 class NeighborGT(nn.Module):
+    """ Generate affinity supervision on the fly based on gt instance labels """
     def __init__(self, options):
         nn.Module.__init__(self)
         self.options = options
@@ -37,6 +38,7 @@ class NeighborGT(nn.Module):
         return
 
     def toDense(self, neighbors):
+        """ Convert prediction of sparse locations to dense representation """
         if len(neighbors) >= 2:
             neighbors[1] = self.unpool_1(neighbors[1])
             pass
@@ -122,6 +124,7 @@ class NeighborGT(nn.Module):
 
 
 class CoordAugmentation(nn.Module):
+    """ Augment input mesh by randomly sampling points inside large faces """
     def __init__(self, options):
         nn.Module.__init__(self)
         self.options = options
@@ -211,8 +214,9 @@ class CoordAugmentation(nn.Module):
         all_edges = torch.stack([all_coord_indices.repeat(6), shifted_coord_indices], dim=-1)
         augmented_edges = all_edges[(shifted_coord_indices > 0) & (shifted_coord_indices.max(-1)[0] > len(coords))] - 1
         return augmented_coords, valid_values[:, :colors.shape[-1]], valid_values[:, colors.shape[-1]:-1].round().long(), augmented_edges
-        
+
 class Model(nn.Module):
+    """ Base model based on sparse convolutions """
     def __init__(self, options):
         nn.Module.__init__(self)
 
@@ -347,75 +351,6 @@ class Model(nn.Module):
         #neighbor_pred_0 = self.neighbor_linear_0(x)
         return semantic_pred, neighbor_pred
 
-class SemanticClassifier(nn.Module):
-    def __init__(self):
-        nn.Module.__init__(self)
-        self.linear = nn.Linear(32, 21)
-        self.invalid_label = torch.Tensor([20]).cuda().long()
-        return
-
-    def forward(self, features, instances, invalid_instances=[], semantics=[]):
-        new_features = []
-        semantic_gt = []
-        instance_masks = []        
-        for instance in range(1, instances.max() + 1):
-            instance_mask = instances == instance
-            indices = torch.nonzero(instance_mask)
-            if len(indices) < 100:
-                continue
-            if len(semantics) == 0:
-                semantic_gt.append(self.invalid_label)
-            else:
-                semantic_gt.append(semantics[indices[0]])
-                pass
-            new_features.append(torch.max(features[instance_mask], dim=0)[0])
-            instance_masks.append(instance_mask)
-            continue
-
-        if len(invalid_instances) > 0:
-            for instance in [np.random.randint(1, invalid_instances.max() + 1)]:
-            #for instance in range(1, invalid_instances.max() + 1):
-                instance_mask = invalid_instances == instance
-                if instance_mask.sum() < 100:
-                    continue
-                semantic_gt.append(self.invalid_label)
-                new_features.append(torch.max(features[instance_mask], dim=0)[0])
-                continue
-            pass
-        new_features = torch.stack(new_features, dim=0)
-        semantic_gt = torch.stack(semantic_gt, dim=0).view(-1).detach()
-        semantic_pred = self.linear(new_features)
-        #semantic_pred = semantic_pred[instances]
-        return semantic_pred, semantic_gt, instance_masks
-        
-
-class Classifier(nn.Module):
-    def __init__(self, full_scale=127, use_normal=False):
-        nn.Module.__init__(self)
-
-        dimension = 3
-        m = 32 # 16 or 32
-        residual_blocks = True #True or False
-        block_reps = 2 #Conv block repetition factor: 1 or 2
-
-        blocks = [['b', m * k, 2, 2] for k in [1, 2, 3, 4, 5]]
-        self.num_final_channels = m * len(blocks)
-
-        self.sparseModel = scn.Sequential().add(
-            scn.InputLayer(dimension, full_scale, mode=4)).add(
-            scn.SubmanifoldConvolution(dimension, 3 + 3 * int(use_normal), m, 3, False)).add(
-            scn.MaxPooling(dimension, 3, 2)).add(
-            scn.SparseResNet(dimension, m, blocks)).add(
-            scn.BatchNormReLU(self.num_final_channels)).add(
-            scn.SparseToDense(dimension, self.num_final_channels))
-
-        self.pred = nn.Linear(m * len(blocks), 21)
-        return
-    
-    def forward(self, coords, colors):
-        x = self.sparseModel((coords, colors))
-        pred = self.pred(x.view((-1, self.num_final_channels)))
-        return pred
 
 class Validator(nn.Module):
     def __init__(self, full_scale=127, use_normal=False):
@@ -450,43 +385,3 @@ class Validator(nn.Module):
         x = torch.cat([x.view((-1, self.num_final_channels))[1:], label_x], dim=1)
         pred = self.pred(x)
         return pred.view(-1)
-
-class FittingModel(nn.Module):
-    def __init__(self, full_scale=255, use_normal=False):
-        nn.Module.__init__(self)
-
-        self.full_scale = full_scale
-        dimension = 3
-        m = 32 # 16 or 32
-        residual_blocks = True #True or False
-        block_reps = 2 #Conv block repetition factor: 1 or 2
-
-        blocks = [['b', m * k, 2, 2] for k in [1, 2, 3, 4, 5, 6]]
-        self.num_final_channels = m * len(blocks)
-
-        self.sparseModel = scn.Sequential().add(
-            scn.InputLayer(dimension, full_scale, mode=4)).add(
-            scn.SubmanifoldConvolution(dimension, 3 + 3 * int(use_normal), m, 3, False)).add(
-            scn.MaxPooling(dimension, 3, 2)).add(
-            scn.SparseResNet(dimension, m, blocks)).add(
-            scn.BatchNormReLU(self.num_final_channels)).add(
-            scn.SparseToDense(dimension, self.num_final_channels))
-
-        self.pred = nn.Linear(m * len(blocks), 6)
-        return
-    
-    def forward(self, coords, colors):
-        x = self.sparseModel((coords, colors))
-        parameter_pred = self.pred(x.view((-1, self.num_final_channels)))
-        tangent_pred = parameter_pred[:, :2]
-        tangent_pred = tangent_pred / torch.norm(tangent_pred, dim=-1, keepdim=True)
-        center_pred = parameter_pred[:, 2:5] * self.full_scale
-        size_pred = parameter_pred[:, 5:7] * self.full_scale
-
-        num_sampled_points = 1000
-        alphas = torch.rand(num_sampled_points, 2).cuda()
-        UVs = (alphas - 0.5) * size_pred.unsqueeze(1)
-        XYZ = torch.cat([UVs[:, :, 0:1] * tangent_pred.unsqueeze(1), UVs[:, :, 1:2]], dim=-1) + center.unsqueeze(1)
-        XYZ = torch.clamp(torch.round(XYZ).int(), min=0, max=full_scale-1)
-        return pred
-    

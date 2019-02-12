@@ -4,6 +4,7 @@ from plyfile import PlyData, PlyElement
 import heapq
 import sys
 
+## Mapping between NYU40 labels and ScanNet evaluation label subset
 remapper = np.full(150, fill_value=-100, dtype=np.int32)
 mapper = np.zeros(21, dtype=np.int32)
 label_subset = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39]
@@ -14,7 +15,7 @@ for i, x in enumerate(label_subset):
 
 
 def write_ply_color(filename, coords, faces, colors):
-    
+    """ Write colored mesh model """
     header = """ply
 format ascii 1.0
 element vertex """
@@ -51,6 +52,7 @@ end_header
     return
 
 def write_ply_label(filename, coords, faces, labels, visualize_boundary=True, debug_index=-1):
+    """ Write mesh model colored by segmentation labels """
     if visualize_boundary:
         valid_indices = np.logical_and(labels[faces[:, 0]] == labels[faces[:, 1]], labels[faces[:, 0]] == labels[faces[:, 2]])
         #print(coords.min(0), coords.max(0))
@@ -112,6 +114,7 @@ end_header
     return
 
 def write_ply_edge(filename, coords, edges, labels, augmented_edges=[]):
+    """ Write mesh model with edges """
     # edges = np.concatenate([faces[:, [0, 1]], faces[:, [0, 2]], faces[:, [1, 2]]], axis=0)
     # if len(augmented_edges) > 0:
     #     edges = np.concatenate([edges, augmented_edges], axis=0)
@@ -172,6 +175,7 @@ end_header
     return
 
 def write_ply_neighbor(filename, coords, neighbors, masks, size=4096):
+    """ Write mesh model to visualize neighbors """
     valid_mask = masks.sum(-1) > 0.5
     coords = coords[valid_mask]
     neighbors = (neighbors[valid_mask] > 0.95).astype(np.int32)
@@ -254,11 +258,13 @@ end_header
 
 
 def writeSemantics(filename, semantics):
+    """ Write semantics """
     semantics = mapper[semantics]    
     np.savetxt(filename, semantics, fmt='%d')
     return
 
 def writeInstances(path, scene_id, instances, semantics, instance_info):
+    """ Write instances """    
     semantics = mapper[semantics]
     print(scene_id, 'num instances', instances.max() + 1)
     #for instance_index in np.unique(instances):
@@ -286,44 +292,13 @@ def writeInstances(path, scene_id, instances, semantics, instance_info):
             np.savetxt(path + '/pred_mask/' + scene_id + '_' + str(instance_index) + '.txt', mask, fmt='%d')
             continue
         pass
-    #return
-    if False:
-        instance_segmentation = np.zeros(len(instances), dtype=np.int32)
-        for instance_index, instance_mask in enumerate(instance_masks):
-            instance_segmentation[instance_mask] = instance_index
-            continue
-        np.save(options.test_dir + '/pred/' + scene_id + '.npy', instance_segmentation)
-        pass    
     return instance_info
 
 def findInstancesSemanticsLabels(edges, semantics, labels=[10, 13, 15, 17, 18], instance_info=[]):
-    #DEBUG_INFO = ['cabinet', 2, 3, 'bed', 3, 4, 'chair', 4, 5, 'sofa', 5, 6, 'table', 6, 7, 'door', 7, 8, 'window', 8, 9, 'bookshelf', 9, 10, 'picture', 10, 11, 'counter', 11, 12, 'desk', 12, 14, 'curtain', 13, 16, 'refrigerator', 14, 24, 'shower curtain', 15, 28, 'toilet', 16, 33, 'sink', 17, 34, 'bathtub', 18, 36, 'otherfurniture', 19, 39]    
-    #instances = np.full(len(semantics), fill_value=-1, dtype=np.int32)
+    """ Find connected components based on semantic predictions """
     ranges = np.arange(len(semantics), dtype=np.int32)
     valid_mask = semantics[edges[:, 0]] == semantics[edges[:, 1]]
-    #source_indices = edges.max(-1)[valid_mask]
-    #target_indices = edges.min(-1)[valid_mask]
-    #print(np.unique(semantics))
     edges = edges[valid_mask]
-    #edges = np.concatenate([edges, edges[:, [1, 0]]], axis=0)
-    
-    # for index, label in enumerate(labels):
-    #     mask = semantics == label
-    #     #instances[mask] = ranges[mask] + index * len(semantics)
-    #     #instances[mask] = index
-    #     instances[mask] = ranges[mask]
-    #     continue
-    
-    # while True:
-    #     new_instances = instances.copy()
-    #     new_instances[edges[:, 0]] = np.minimum(instances[edges[:, 0]], instances[edges[:, 1]])
-    #     new_instances[edges[:, 1]] = np.minimum(instances[edges[:, 0]], instances[edges[:, 1]])
-        
-    #     #new_instances[source_indices] = instances[target_indices]
-    #     if np.all(new_instances == instances):
-    #         break
-    #     instances = new_instances
-    #     continue
     
     instance_masks = []
     for label in labels:
@@ -358,95 +333,22 @@ def findInstancesSemanticsLabels(edges, semantics, labels=[10, 13, 15, 17, 18], 
             continue
         continue            
         
-    # unique_instances, instances, counts = np.unique(instances, return_inverse=True, return_counts=True)
-    # index_map = np.full(len(unique_instances), fill_value=-1, dtype=np.int32)
-    # new_index = 0
-    # for index, (instance, count) in enumerate(zip(unique_instances, counts)):
-    #     if instance < 0 or count < 50:
-    #         continue
-    #     #print(semantics[(instances == index).nonzero()[0][0]], count)
-    #     instance_info
-    #     index_map[index] = new_index
-    #     new_index += 1
-    #     continue
-    # instances = index_map[instances]
     instances = np.full(len(semantics), fill_value=-1, dtype=np.int32)
     for index, mask in enumerate(instance_masks):
         instances[mask] = index
         continue
     return instances, len(instance_masks)
 
-def findInstancesSemantics(options, edges, semantics):
-    #print(faces.shape, faces.min(), faces.max(), semantics.shape)
-    #edges = np.concatenate([faces[:, [0, 1]], faces[:, [0, 2]], faces[:, [1, 2]]], axis=0)
-    scores = semantics[edges[:, 0]] == semantics[edges[:, 1]]
-    nodes = np.stack([np.arange(len(semantics), dtype=np.int32), np.arange(len(semantics))], axis=-1).tolist()
-    nodes = [[[node[0], ], [], node[1]] for node in nodes]
-    edges = np.concatenate([1 - np.expand_dims(scores, -1), edges], axis=-1).tolist()
-    print((scores > 0.5).sum(), len(scores))
-    edge_queue = []    
-    for edge in edges:
-        edge_queue.append(tuple(edge))
-        nodes[edge[1]][1].append(edge[2])
-        nodes[edge[2]][1].append(edge[1])
-        continue
-    heapq.heapify(edge_queue)
-    threshold = 0.5
-    while True:
-        if len(edge_queue) == 0:
-            break
-        if len(edge_queue) % 100 == 0:
-            print(len(edge_queue))
-            pass
-        edge = heapq.heappop(edge_queue)
-        if edge[0] > threshold:
-            break
-        node_indices = []
-        for node_index in edge[1:3]:
-            visited_node_indices = []
-            while nodes[node_index][-1] != node_index:
-                visited_node_indices.append(node_index)                    
-                node_index = nodes[node_index][-1]
-                continue
-            for _ in visited_node_indices:
-                nodes[_][-1] = node_index
-                continue
-            node_indices.append(node_index)
-            continue
-        if node_indices[0] == node_indices[1]:
-            continue
-        nodes[node_indices[0]][0] += nodes[node_indices[1]][0]
-        nodes[node_indices[1]][0] = []
-        nodes[node_indices[1]][-1] = node_indices[0]
-        continue
-    
-    instances = np.array([node[-1] for node in nodes])
-    while True:
-        new_instances = instances[instances]
-        if np.all(new_instances == instances):
-            break
-        instances = new_instances
-        continue
-    
-    _, instances = np.unique(instances, return_inverse=True)
-    instance_labels, counts = np.unique(instances, return_counts=True)
-    valid_labels = instance_labels[counts > 100]
-    print('num valid instances', len(valid_labels))
-    label_map = np.full(len(counts), fill_value=-1)
-    for index, label in enumerate(valid_labels):
-        label_map[label] = index
-        continue
-    instances = label_map[instances]
-    
-    return instances.astype(np.int32)
-
 def toIndex(coord, size):
+    """ Coordinate to index """
     return coord[0] * size * size + coord[1] * size + coord[2]
         
 def toCoord(index, size):
+    """ Index to coordinate """    
     return np.array([index // (size * size), index // size % size, index % size])
 
 def loadInstance(filename):
+    """ Load saved instance for later visualization """
     with open(filename, 'r') as f:
         print('load instances', filename)
         for line_index, line in enumerate(f):
@@ -461,18 +363,13 @@ def loadInstance(filename):
     return instances
                 
 def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_scales, full_scale=4096, num_neighbors=6, num_dimensions=3, print_info=True, cache_filename='', scene_id=''):
+    """ Clustering algorithm """
     debug = False
     if cache_filename != '':
-        return np.load('cache/' + str(num_scales) + '/' + scene_id + '.npy'), []
-        #return np.load('test/instances.npy'), []        
         instances = loadInstance(cache_filename)
         return instances, []
 
     num_scales = num_scales
-    if False:
-        num_scales = 1
-        #neighbors[0] += np.random.random(neighbors[0].shape) * 0.05
-        pass
     
     for scale in range(num_scales):
         offsets = [0, num_neighbors]
@@ -484,79 +381,6 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
         continue
     coord_offsets = np.array([[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]])
     
-    if False:
-        neighbors_0 = neighbors[1][1]
-        coords = coords // pow(2, 1)
-        size = full_scale // pow(2, 1)
-        starting_index = np.random.randint(len(coords))
-        print(starting_index)
-        #starting_index = 114427
-        coord_neighbors = {}                
-        for coord, neighbor in zip(coords, neighbors_0):
-            #coord_neighbors[toIndex(coord)] = neighbor.argmax() == np.arange(6)
-            coord_neighbors[toIndex(coord, size)] = neighbor
-            continue
-
-        #offsets = np.array([[0, 0, -1], [0, 0, 1], [0, -1, 0], [0, 1, 0], [-1, 0, 0], [1, 0, 0]])
-        instance = {toIndex(coords[starting_index], size): True}
-        active_coords = [coords[starting_index]]
-        while len(active_coords) > 0:
-            new_coords = []
-            for coord in active_coords:
-                #neighbor = neighbors_0[toIndex(coord)]
-                neighbor = coord_neighbors[toIndex(coord, size)]
-                for offset in coord_offsets[neighbor > 0.5]:
-                    neighbor_coord = coord + offset
-                    neighbor_index = toIndex(neighbor_coord, size)
-                    if neighbor_index in instance:
-                        continue
-                    instance[neighbor_index] = True
-                    new_coords.append(neighbor_coord)
-                    continue
-                continue
-            active_coords = new_coords
-            continue
-
-        instance_mask = {}        
-        for index in instance.keys():
-            instance_mask[index] = True
-            continue
-        instance = np.array([toCoord(index, size) for index in instance.keys()])
-        print(instance.shape)
-        write_ply('test/instance', instance, np.zeros(instance.shape), np.zeros(len(instance), dtype=np.int32), write_input=False)
-        exit(1)
-        pass
-
-    # print(coords[38])
-    # print(coords[1075])    
-    # print(coords[1846])
-    # print(neighbors[0][0][38])
-    # print(neighbors[0][0][1075])
-    # print(neighbors[0][0][1846])        
-    # print(neighbors[1][1][1846])    
-    # print(neighbors[1][1][1075])
-    # exit(1)
-    
-    # count_dicts = [{}]
-    # for scale in range(1, num_scales):
-    #     size = full_scale // pow(2, scale)
-    #     count_dict = {}
-    #     scale_coords = coords // pow(2, scale)
-    #     indices = scale_coords[:, 0] * size * size + scale_coords[:, 1] * size + scale_coords[:, 2]
-                
-    #     for index in indices:
-    #         if index not in count_dict:
-    #             count_dict[index] = 0
-    #             pass
-    #         count_dict[index] += 1
-    #         continue
-    #     count_dicts.append(count_dict)
-    #     continue
-
-    # coord_neighbors = []
-    # for scale_index, scale_neighbors in neighbors:
-    #     coord_neighbors.append([{toIndex(coord): neighbor for coord, neighbor in zip(coords, scale_neighbor)} for scale_neighbor in scale_neighbors])
-    #     continue
     
     scale_count_thresholds = pow(4, np.arange(num_scales))
     connection_ratio_threshold = 0.2    
@@ -622,11 +446,6 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
             continue
         pass
 
-    # print(neighbors[0][0].shape, neighbors[0][0].max(-1).min())
-    # valid_node_mask = neighbors[0][0].max(-1) > 0.5
-    # print(edges.shape)
-    # edges = edges[np.logical_and(valid_node_mask[edges[:, 0]], valid_node_mask[edges[:, 1]])]
-    # print(valid_node_mask.sum(), edges.shape)    
     ori_edges = edges
     
     intermediate_instances = []
@@ -643,26 +462,9 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
         # print(edges.max(), len(coords), len(node_info))
         for edge_index, edge in enumerate(edges):
             node_pair = edge
-            # node_pair = [ori_node_mapping[node_index] for node_index in edge]
-            # if node_pair[0] == node_pair[1]:
-            #     continue
-            # node_pair = (min(node_pair), max(node_pair))
-            # if node_pair[0] in node_scores and node_pair[1] in node_scores[node_pair[0]]:
-            #     continue
             
             semantic_similarity = ((node_info[node_pair[0]][1] / max(node_info[node_pair[0]][1].sum(), 1)) * (node_info[node_pair[1]][1] / max(node_info[node_pair[1]][1].sum(), 1))).sum()
-            #if semantic_similarity < 0.5:
-            #continue
-            
-            # label_counts = node_info[node_pair[0]][1] + node_info[node_pair[1]][1]
-            # if label_counts.max() != label_counts.sum():
-            #     for c in range(2):
-            #         if node_pair[c] not in node_scores:
-            #             node_scores[node_pair[c]] = {}
-            #             pass
-            #         node_scores[node_pair[c]][node_pair[1 - c]] = 0
-            #         continue
-            #     continue
+
             scores = []
             score_info = []
             #largest_scale = min([max(node_info[node_pair[0]][0].keys()) for c in range(2)])
@@ -728,20 +530,7 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
                             #score_info.append(np.full((len(direction_indices), 2), fill_value=scale_1))                            
                             scores.append(((neighbors[scale_1][scale_2][indices_1, direction_mapping[direction_indices + 4]] + neighbors[scale_2][scale_1][indices_2, direction_mapping[-direction_indices + 4]]) / 2).mean())
                             score_info.append(np.array([scale_1, scale_1]))
-                        else:
-                            if iteration >= 4:
-                                #print(len(direction_indices), instance_size)
-                                pass
-                            pass                        
-                        # for direction in directions:
-                        #     distance = np.abs(direction).sum()
-                        #     if distance == 0 and scale_1 == 0:
-                        #         scores.append(1)
-                        #     elif distance == 1:
-                        #         direction_index = np.dot(direction, direction_multiplier)
-                        #         #print(len(neighbors), len(neighbors[scale_1]), neighbors[scale_1][direction_mapping[direction_index]].shape)
-                        #         scores.append((neighbors[scale_1][scale_2][direction_mapping[direction_index]][edge[0]] + neighbors[scale_2][scale_1][direction_mapping[-direction_index]][edge[1]]) / 2)
-                        #         pass
+                            pass
                     elif abs(scale_1 - scale_2) <= num_cross_scales:
                         if scale_1 > scale_2:
                             scale_1, scale_2 = scale_2, scale_1
@@ -783,23 +572,9 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
                             pass
 
                         if len(direction_indices) > 0:
-                            #scores.append((distances == 0) * neighbors[scale_1][scale_2][indices_1, num_neighbors] + (distances == 1) * neighbors[scale_1][scale_2][indices_1, direction_mapping[direction_indices + 4]])
-                            #print(indices_1, direction_indices, neighbors[scale_1][scale_2][indices_1, direction_mapping[direction_indices + 4]])
-                            #exit(1)
-                            #score_info.append(np.stack([np.full(len(direction_indices), fill_value=scale_1), np.full(len(direction_indices), fill_value=scale_2)], axis=-1))
                             scores.append(neighbors[scale_1][scale_2][indices_1, direction_mapping[direction_indices + 4]].mean())
                             score_info.append(np.array([scale_1, scale_2]))
-                            pass
-                        
-                        # for direction in directions:
-                        #     distance = np.abs(direction).sum()
-                        #     if distance == 0:
-                        #         scores.append(neighbors[scale_1][scale_2][num_neighbors][ori_node_index])
-                        #     elif distance == 1:
-                        #         direction_index = np.dot(direction, direction_multiplier)
-                        #         scores.append(neighbors[scale_1][scale_2][direction_mapping[direction_index]][ori_node_index])
-                        #         pass
-                        #     continue
+                            pass                        
                         pass
                     continue
                 continue
@@ -816,25 +591,6 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
                         print(scores)
                         exit(1)
                         pass
-                if False:
-                    score_info = np.stack(score_info, axis=0)
-                    scores_0 = scores[np.all(score_info == 0, axis=-1)]
-                    if len(scores_0) > 0:
-                        if (scores_0.mean() > 0.5) != (score > 0.5):
-                            #print(np.concatenate([np.expand_dims(scores, axis=-1), score_info], axis=-1))
-                            print('difference')
-                            print(node_pair)
-                            print(node_info[node_pair[0]], node_info[node_pair[1]])
-                            print(np.concatenate([np.expand_dims(scores, -1), score_info], axis=-1))
-                            #exit(1)
-                            pass
-                    else:
-                        print('no zero')
-                        print(node_info[node_pair[0]], node_info[node_pair[1]])
-                        print(scores, score_info)
-                        #exit(1)                        
-                        pass
-                    pass
                 
                 for c in range(2):
                     if node_pair[c] not in node_scores:
@@ -853,11 +609,6 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
         for node, neighbor_scores in node_scores.items():
             max_score_neighbor = (0.5, -1)
             for neighbor, score in neighbor_scores.items():
-                # if len(scores) == 0:
-                #     continue
-                # if len(node_scores) < 100:
-                #     print(score)
-                #     pass
                 if score > max_score_neighbor[0]:
                     max_score_neighbor = [score, neighbor]
                     pass
@@ -870,21 +621,6 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
         if not has_change:
             break
 
-        # for ori_node, node in enumerate(node_mapping):
-        #     if (toIndex(coords[ori_node]) in instance_mask) != (toIndex(coords[node]) in instance_mask):
-        #         print(toIndex(coords[ori_node]) in instance_mask, toIndex(coords[node]) in instance_mask, ori_node, node, coords[ori_node], coords[node], neighbors[0][0][ori_node], neighbors[0][0][node])
-        #         exit(1)
-        #         pass
-        #     continue
-        
-        # while True:
-        #     new_node_mapping = node_mapping[node_mapping]
-        #     print((new_node_mapping == node_mapping).sum(), 
-        #     if np.all(new_node_mapping == node_mapping):
-        #         break
-        #     node_mapping = new_node_mapping
-        #     continue
-        
         new_node_mapping = np.full(node_mapping.shape, fill_value=-1, dtype=node_mapping.dtype)
         new_node_index = 0
         for ori_node, node in enumerate(node_mapping):
@@ -900,9 +636,6 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
                 node = node_mapping[node]
                 continue
             instance = list(instance.keys())
-            # if instance_index == 148 or new_node_index == 148:
-            #     print([(_, new_node_mapping[_], node_mapping[_], instance_index, len(node_instances)) for _ in instance])
-            #     pass
             if instance_index != -1:
                 for node_index in instance:
                     new_node_mapping[node_index] = instance_index
@@ -925,34 +658,7 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
             node_instances[node].append(ori_node)
             continue
         
-        # instance = (new_node_mapping == new_node_mapping[108277]).nonzero()[0]
-        # print([(_, coords[_], toIndex(coords[_]) in instance_mask, new_node_mapping[_], node_mapping[_]) for _ in instance])        
-        # for node, instance in enumerate(node_instances):
-        #     mask = {}            
-        #     for node_index in instance:
-        #         mask[toIndex(coords[node_index]) in instance_mask] = node_index
-        #         if len(mask) == 2:
-        #             #node_mapping[_], new_node_mapping[_]
-        #             print([(_, coords[_], toIndex(coords[_]) in instance_mask, new_node_mapping[_], node_mapping[_]) for _ in instance])
-        #             print(node, mask)
-        #             exit(1)
-        #             pass
-        #         continue
-        #     continue
-        
-        # _, node_mapping = np.unique(node_mapping, return_inverse=True)
-        # node_instances = [[] for _ in range(node_mapping.max() + 1)]        
-        # for ori_node, node in enumerate(node_mapping):
-        #     node_instances[node].append(ori_node)
-        #     continue
-        
-        #print('num nodes', len(node_instances), max([len(instance) for instance in node_instances]), len(np.unique(np.concatenate([np.array(instance) for instance in node_instances], axis=0))), len(coords))
-        
         iteration += 1        
-        # if iteration == 5:
-        #     break
-        #if len(node_instances) < 100:
-        #break
 
         if print_info:
             print('num nodes', len(node_instances))
@@ -991,82 +697,4 @@ def findInstances(coords, edges, semantics, neighbors, num_scales, num_cross_sca
         continue
     instances = ori_node_mapping
 
-    np.save('cache/' + str(num_scales) + '/' + scene_id + '.npy', instances)
     return instances, intermediate_instances
-    
-    instance_labels, counts = np.unique(instances, return_counts=True)
-    valid_labels = instance_labels[counts > 100]
-    print('num valid instances', len(valid_labels))
-    label_map = np.full(len(node_info), fill_value=-1, dtype=np.int32)
-    for index, label in enumerate(valid_labels):
-        label_map[label] = index
-        continue
-    instances = label_map[instances]
-    # while True:
-    #     new_instances = instances[instances]
-    #     if np.all(new_instances == instances):
-    #         break
-    #     instances = new_instances
-    #     continue    
-    # _, instances = np.unique(instances, return_inverse=True)
-    
-    # if use_cache in [0, 1]:
-    #     np.save('test/instance.npy', instances)
-    #     pass
-    return instances
-
-# def findInstancesDebug(options, faces, semantics, instance_gt):
-#     #print(faces.shape, faces.min(), faces.max(), semantics.shape)
-#     edges = np.concatenate([faces[:, [0, 1]], faces[:, [0, 2]], faces[:, [1, 2]]], axis=0)
-#     #print(len(instance_gt), faces.min(), faces.max(), edges.shape)
-#     #scores = instance_gt[edges[:, 0]] == instance_gt[edges[:, 1]]
-#     scores = semantics[edges[:, 0]] == semantics[edges[:, 1]]
-#     #nodes = np.stack([np.arange(len(semantics), dtype=np.int32), np.arange(len(semantics))], axis=-1).tolist()
-#     nodes = [[[node_index, ], node_index] for node_index in range(len(semantics))]
-#     edges = np.concatenate([1 - np.expand_dims(scores, -1), edges], axis=-1)
-#     #print((scores > 0.5).sum(), len(scores))
-#     edge_queue = []    
-#     for edge in edges:
-#         edge_queue.append(tuple(edge))
-#         #nodes[edge[1]][1].append(edge[2])
-#         #nodes[edge[2]][1].append(edge[1])
-#         continue
-#     heapq.heapify(edge_queue)
-#     threshold = 0.5
-#     while True:
-#         if len(edge_queue) == 0:
-#             break
-#         if len(edge_queue) % 1000 == 0:
-#             print(len(edge_queue))
-#             pass
-#         edge = heapq.heappop(edge_queue)
-#         if edge[0] > threshold:
-#             break
-#         node_indices = []
-#         for node_index in edge[1:3]:
-#             visited_node_indices = []
-#             while nodes[node_index][-1] != node_index:
-#                 visited_node_indices.append(node_index)                    
-#                 node_index = nodes[node_index][-1]
-#                 continue
-#             for _ in visited_node_indices:
-#                 nodes[_][-1] = node_index
-#                 continue
-#             node_indices.append(node_index)
-#             continue
-#         if node_indices[0] == node_indices[1]:
-#             continue
-#         nodes[node_indices[0]][0] += nodes[node_indices[1]][0]
-#         nodes[node_indices[1]][0] = []
-#         nodes[node_indices[1]][-1] = node_indices[0]
-#         continue
-#     instances = np.array([node[-1] for node in nodes])
-#     while True:
-#         new_instances = instances[instances]
-#         if np.all(new_instances == instances):
-#             break
-#         instances = new_instances
-#         continue
-#     _, instances = np.unique(instances, return_inverse=True)
-#     print('valid', (instances[edges[:, 0]] == instances[edges[:, 1]]).min())
-#     return instances.astype(np.int64)

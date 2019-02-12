@@ -10,6 +10,7 @@ blur0=np.ones((3,1,1)).astype('float32')/3
 blur1=np.ones((1,3,1)).astype('float32')/3
 blur2=np.ones((1,1,3)).astype('float32')/3
 
+## Elastic augmentation from https://github.com/facebookresearch/SparseConvNet/blob/master/examples/ScanNet/data.py
 def elastic(x,gran,mag):
     bb=np.abs(x).max(0).astype(np.int32)//gran+3
     noise=[np.random.randn(bb[0],bb[1],bb[2]).astype('float32') for _ in range(3)]
@@ -27,8 +28,8 @@ def elastic(x,gran,mag):
     noise = g(x)
     return x+g(x)*mag
 
-## ScanNet dataset class
 class ScanNetDataset(Dataset):
+    """ ScanNet data loader """
     def __init__(self, options, split, load_confidence=False, random=True):
         self.options = options
         self.split = split
@@ -37,19 +38,23 @@ class ScanNetDataset(Dataset):
         self.dataFolder = options.dataFolder
         self.load_confidence = load_confidence
         
-        with open('split_' + split + '.txt', 'r') as f:
+        with open('datasets/split_' + split + '.txt', 'r') as f:
             for line in f:
                 scene_id = line.strip()
                 if len(scene_id) < 5 or scene_id[:5] != 'scene':
                     continue
                 if options.scene_id != '' and options.scene_id not in scene_id:
                     continue
+                if load_confidence:
+                    confidence_filename = options.test_dir + '/inference/' + split + '/cache/' + scene_id + '.pth'
+                    if not os.path.exists(confidence_filename):
+                        continue
+                    pass
                 filename = self.dataFolder + '/' + scene_id + '/' + scene_id + '_vh_clean_2.pth'
                 if os.path.exists(filename):
                     info = torch.load(filename)
                     if len(info) == 5:
                         self.imagePaths.append(filename)
-
                         #np.savetxt('semantic_val/' + scene_id + '.txt', info[2], fmt='%d')
                         pass
                     pass
@@ -58,7 +63,8 @@ class ScanNetDataset(Dataset):
                 continue
             pass
         
-        #self.imagePaths = [filename for filename in self.imagePaths if 'scene0217_00' in filename]
+        #self.imagePaths = [filename for filename in self.imagePaths if 'scene0217_00' in filename]        
+        print('the number of images', split, len(self.imagePaths))    
 
         if options.numTrainingImages > 0 and split == 'train':
             self.numImages = options.numTrainingImages
@@ -89,15 +95,10 @@ class ScanNetDataset(Dataset):
             pass
 
         coords, colors, labels, instances, faces = torch.load(self.imagePaths[index])
-        invalid_instances, = torch.load(self.imagePaths[index].replace('.pth', '_invalid.pth'))
+        #invalid_instances, = torch.load(self.imagePaths[index].replace('.pth', '_invalid.pth'))
                                        
         labels = remapper[labels]
         
-        #neighbor_gt = torch.load(self.imagePaths[index].replace('.pth', '_neighbor.pth'))
-        #print(neighbor_gt[0])
-        #exit(1)
-        #neighbor_gt = 1
-        #print(coords.min(0), coords.max(0))
         if self.split == 'train':
             m = np.eye(3) + np.random.randn(3,3) * 0.1
             m[0][0] *= np.random.randint(2) * 2 - 1
@@ -117,6 +118,7 @@ class ScanNetDataset(Dataset):
             #coords = elastic(coords, 20 * scale // 50, 160 * scale / 50)
             pass
 
+        ## Load normals as input
         if 'normal' in self.options.suffix:
             points_1 = coords[faces[:, 0]]
             points_2 = coords[faces[:, 1]]
@@ -134,10 +136,11 @@ class ScanNetDataset(Dataset):
         if self.split == 'train':
             colors[:, :3] = colors[:, :3] + np.random.randn(3) * 0.1            
             pass
-        
+
+        ## Load instance segmentation results to train the confidence prediction network
         if self.load_confidence:
             scene_id = self.imagePaths[index].split('/')[-1].split('_vh_clean_2')[0]
-            info = torch.load('test/output_normal_augment_2_' + self.split + '/cache/' + scene_id + '.pth')
+            info = torch.load(self.options.test_dir + '/inference/' + self.split + '/cache/' + scene_id + '.pth')
             if len(info) == 2:
                 semantic_pred, instance_pred = info
             else:
@@ -203,20 +206,9 @@ class ScanNetDataset(Dataset):
             pass
         
         coords = np.round(coords)
-        if False:
-            idxs = (coords.min(1) >= 0) * (coords.max(1) < full_scale)
-            coords = coords[idxs]
-            colors = colors[idxs]
-            labels = labels[idxs]
-            instances = instances[idxs]
-            invalid_instances = invalid_instances[idxs]
-        else:
-            #print(coords.min(0), coords.max(0))
-            #exit(1)
-            coords = np.clip(coords, 0, full_scale - 1)
-            pass
+        coords = np.clip(coords, 0, full_scale - 1)
         
         coords = np.concatenate([coords, np.full((coords.shape[0], 1), fill_value=index)], axis=-1)
         #coords = np.concatenate([coords, np.expand_dims(instances, -1)], axis=-1)
-        sample = [coords.astype(np.int64), colors.astype(np.float32), faces.astype(np.int64), labels.astype(np.int64), instances.astype(np.int64), invalid_instances.astype(np.int64), self.imagePaths[index]]
+        sample = [coords.astype(np.int64), colors.astype(np.float32), faces.astype(np.int64), labels.astype(np.int64), instances.astype(np.int64), self.imagePaths[index]]
         return sample
