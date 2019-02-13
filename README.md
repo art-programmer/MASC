@@ -1,6 +1,6 @@
 # MASC: Multi-scale Affinity with Sparse Convolution for 3D Instance Segmentation (Technical Report)
 ## Introduction
-This is the PyTorch implementation for our [technical report]() which achieves the state-of-the-art performance on the 3D instance segmentation task of the ScanNet benchmark.
+This is the PyTorch implementation for our [technical report](https://arxiv.org/abs/1902.04478) which achieves the state-of-the-art performance on the 3D instance segmentation task of the ScanNet benchmark.
 
 ## Installation
 ```
