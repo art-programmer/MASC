@@ -29,7 +29,7 @@ python train.py --restore=1 --dataFolder=[SCANNET_PATH] --task=test
 To run the inference using the trained model, please run:
 
 ```
-python inference.py --restore=0 --dataFolder=[SCANNET_PATH] --task=predict_cluster split=val
+python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster split=val
 ```
 
 The task option indicates:
@@ -37,13 +37,13 @@ The task option indicates:
 - "cluster": run the clustering algorithm based on the predicted affinities
 - "write": write instance segmentation results
 
-The task option can contain any combinations of these three tasks, but the earlier task must be run before later tasks.
+The "task" option can contain any combinations of these three tasks, but the earlier task must be run before later tasks. And a task only needs to be run once. The "split" option specifies the data split to run the inference.
 
 ## Write results for the final evaluation
 To train the instance confidence model, please first generate the instance segmentation results:
 ```
-python inference.py --restore=0 --dataFolder=[SCANNET_PATH] --task=predict_cluster split=val
-python inference.py --restore=0 --dataFolder=[SCANNET_PATH] --task=predict_cluster split=train
+python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster split=val
+python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster split=train
 ```
 
 Then train the confidence model:
@@ -53,5 +53,5 @@ python train.py --restore=0 --dataFolder=[SCANNET_PATH]
 
 Predict instance confidence, add additional instances for certain semantic labels, and write instance segmentation results:
 ```
-python inference.py --restore=0 --dataFolder=[SCANNET_PATH] --task=predict_cluster_write split=test
+python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster_write split=test
 ```
