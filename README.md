@@ -6,6 +6,7 @@ This is the PyTorch implementation for our [technical report](https://arxiv.org/
 ```
 pip install -r requirements.txt
 ```
+We are using Python 3.5.2. And as pointed out by [Issue #3](https://github.com/art-programmer/MASC/issues/3), please consider using Python 3.6 and refer to [SparseConvNet](https://github.com/facebookresearch/SparseConvNet) for related issues.
 
 ## Data preparation
 To prepare training data from ScanNet mesh models, please run:
