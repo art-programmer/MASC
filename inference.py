@@ -187,11 +187,7 @@ if __name__ == '__main__':
     filenames = []
     split = options.split
 
-    if split == 'test':
-        data_folder = '/gruvi/Data/chenliu/ScanNet/scans_test/'
-    else:
-        data_folder = '/gruvi/Data/chenliu/ScanNet/scans/'
-        pass
+    data_folder = options.dataFolder
 
     test_dir = 'test/' + options.keyname + '/inference/' + split + '/'
     if not os.path.exists(test_dir):
