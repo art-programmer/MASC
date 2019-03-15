@@ -11,7 +11,7 @@ We are using Python 3.5.2. And as pointed out by [Issue #3](https://github.com/a
 ## Data preparation
 To prepare training data from ScanNet mesh models, please run:
 ```
-python train.py --task=prepare --dataFolder=[SCANNET_PATH] ----labelFile=[SCANNET_LABEL_FILE_PATH (i.e., scannetv2-labels.combined.tsv)]
+python train.py --task=prepare --dataFolder=[SCANNET_PATH] --labelFile=[SCANNET_LABEL_FILE_PATH (i.e., scannetv2-labels.combined.tsv)]
 ```
 
 ## Training
@@ -43,13 +43,13 @@ The "task" option can contain any combinations of these three tasks, but the ear
 ## Write results for the final evaluation
 To train the instance confidence model, please first generate the instance segmentation results:
 ```
-python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster split=val
-python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster split=train
+python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster --split=val
+python inference.py --dataFolder=[SCANNET_PATH] --task=predict_cluster --split=train
 ```
 
 Then train the confidence model:
 ```
-python train.py --restore=0 --dataFolder=[SCANNET_PATH]
+python train_confidence.py --restore=0 --dataFolder=[SCANNET_PATH]
 ```
 
 Predict instance confidence, add additional instances for certain semantic labels, and write instance segmentation results:
